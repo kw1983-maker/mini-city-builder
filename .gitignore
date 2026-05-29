@@ -1,0 +1,7 @@
+# Editor / OS cruft
+.DS_Store
+Thumbs.db
+*.log
+
+# Local Claude launch config (dev-only)
+.claude/

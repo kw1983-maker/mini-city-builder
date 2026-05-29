@@ -1,0 +1,1171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MiniMetro — 3D City Builder</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; font-family: "Segoe UI", system-ui, sans-serif; background: #0a0e14; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: fixed; top: 12px; left: 12px; right: 12px;
+    display: flex; justify-content: space-between; align-items: flex-start;
+    pointer-events: none; z-index: 10;
+  }
+  .panel {
+    background: rgba(16,22,33,0.82); backdrop-filter: blur(8px);
+    border: 1px solid rgba(120,160,220,0.2); border-radius: 12px;
+    color: #e8eef7; pointer-events: auto;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+  }
+
+  /* Stats bar */
+  #stats { display: flex; gap: 4px; padding: 8px; }
+  .stat { padding: 6px 12px; border-radius: 8px; min-width: 92px; }
+  .stat .label { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: #8aa0c0; }
+  .stat .value { font-size: 19px; font-weight: 700; margin-top: 2px; }
+  .stat .delta { font-size: 11px; margin-top: 1px; color: #5ad17f; }
+  .stat .delta.neg { color: #e8746a; }
+
+  /* Clock */
+  #clock { padding: 8px 14px; text-align: center; }
+  #clock .time { font-size: 22px; font-weight: 700; letter-spacing: .04em; }
+  #clock .phase { font-size: 11px; color: #8aa0c0; text-transform: uppercase; letter-spacing: .1em; margin-top: 2px;}
+
+  /* Toolbar */
+  #toolbar {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; gap: 6px; padding: 8px; z-index: 10;
+  }
+  .tool {
+    display: flex; flex-direction: column; align-items: center; gap: 3px;
+    background: rgba(30,40,56,0.6); border: 1px solid transparent;
+    border-radius: 10px; padding: 8px 12px; cursor: pointer; color: #cdd9ea;
+    transition: all .12s; min-width: 62px; user-select: none;
+  }
+  .tool:hover { background: rgba(50,66,90,0.8); }
+  .tool.active { background: linear-gradient(160deg,#3a7bd5,#2554a0); border-color: #6ea8ff; color:#fff; box-shadow: 0 0 16px rgba(80,140,255,.4); }
+  .tool .ic { font-size: 22px; }
+  .tool .nm { font-size: 11px; font-weight: 600; }
+  .tool .cost { font-size: 10px; color: #9fb3cf; }
+  .tool.active .cost { color: #d8e6ff; }
+
+  /* Controls (speed etc) */
+  #sidecontrols { position: fixed; top: 84px; right: 12px; display:flex; flex-direction:column; gap:6px; z-index:10; align-items:flex-end; }
+  .ctlrow { display:flex; gap:6px; }
+  .btn {
+    background: rgba(30,40,56,0.7); border: 1px solid rgba(120,160,220,0.2);
+    border-radius: 9px; padding: 8px 12px; cursor: pointer; color: #cdd9ea;
+    font-size: 13px; font-weight:600; pointer-events:auto; transition: all .12s; user-select:none;
+  }
+  .btn:hover { background: rgba(50,66,90,0.9); color:#fff; }
+  .btn.on { background: linear-gradient(160deg,#3a7bd5,#2554a0); color:#fff; border-color:#6ea8ff; }
+
+  #hint {
+    position: fixed; bottom: 92px; left: 50%; transform: translateX(-50%);
+    background: rgba(16,22,33,0.85); color: #b9c8de; padding: 6px 14px;
+    border-radius: 20px; font-size: 12px; z-index: 9; pointer-events:none;
+    border: 1px solid rgba(120,160,220,0.18);
+  }
+  #toast {
+    position: fixed; top: 80px; left: 50%; transform: translateX(-50%) translateY(-20px);
+    background: rgba(180,60,55,0.95); color:#fff; padding: 8px 18px; border-radius: 8px;
+    font-size: 13px; font-weight:600; z-index: 20; opacity:0; transition: all .3s; pointer-events:none;
+  }
+  #toast.show { opacity:1; transform: translateX(-50%) translateY(0); }
+  .help { font-size: 11px; color:#7e90ac; margin-top:6px; padding: 0 8px 8px; }
+
+  /* RCI demand */
+  #rci { position: fixed; left: 12px; bottom: 16px; padding: 10px 12px; z-index: 10; width: 150px; }
+  #rci .rci-title { font-size: 10px; text-transform: uppercase; letter-spacing:.1em; color:#8aa0c0; margin-bottom: 7px; }
+  .rci-row { display:flex; align-items:center; gap:8px; margin: 5px 0; }
+  .rci-label { font-size: 13px; font-weight:800; width: 12px; text-align:center; }
+  .rci-track { flex:1; height: 9px; background: rgba(255,255,255,0.08); border-radius: 5px; overflow:hidden; }
+  .rci-fill { height:100%; width:0%; border-radius:5px; transition: width .4s ease; }
+  .rci-cap { font-size:10px; color:#7e90ac; margin-top:6px; }
+
+  #save-ind { font-size: 11px; color:#5ad17f; opacity:0; transition: opacity .3s; padding-right:4px; }
+  #save-ind.show { opacity:1; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<div id="hud">
+  <div class="panel" id="statsPanel">
+    <div id="stats">
+      <div class="stat"><div class="label">💰 Treasury</div><div class="value" id="s-money">$2,000</div><div class="delta" id="s-money-d">+$0/s</div></div>
+      <div class="stat"><div class="label">👥 Population</div><div class="value" id="s-pop">0</div><div class="delta" id="s-pop-d">+0/min</div></div>
+      <div class="stat"><div class="label">🚗 Traffic</div><div class="value" id="s-traffic">0%</div><div class="delta" id="s-traffic-d">flowing</div></div>
+      <div class="stat"><div class="label">😊 Happiness</div><div class="value" id="s-happy">100%</div><div class="delta" id="s-happy-d">good</div></div>
+      <div class="stat"><div class="label">⚡ Power</div><div class="value" id="s-power">0/0</div><div class="delta" id="s-power-d">no demand</div></div>
+    </div>
+    <div class="help">Drag to orbit · Scroll to zoom · Click ground to build · Right-click a tile to demolish</div>
+  </div>
+  <div class="panel" id="clock">
+    <div class="time" id="c-time">06:00</div>
+    <div class="phase" id="c-phase">Dawn · Day 1</div>
+  </div>
+</div>
+
+<div id="hint">Pick a tool below, then click the ground to place it</div>
+
+<div class="panel" id="rci">
+  <div class="rci-title">📊 Demand</div>
+  <div class="rci-row"><span class="rci-label" style="color:#5ad17f">R</span><div class="rci-track"><div class="rci-fill" id="rci-r" style="background:#3fbf63"></div></div></div>
+  <div class="rci-row"><span class="rci-label" style="color:#5d9fe8">C</span><div class="rci-track"><div class="rci-fill" id="rci-c" style="background:#3a7bd5"></div></div></div>
+  <div class="rci-row"><span class="rci-label" style="color:#e8c95d">I</span><div class="rci-track"><div class="rci-fill" id="rci-i" style="background:#d8a73a"></div></div></div>
+  <div class="rci-cap" id="rci-cap">Residents 0 · Jobs 0</div>
+</div>
+
+<div class="panel" id="toolbar">
+  <div class="tool" data-tool="road"><div class="ic">🛣️</div><div class="nm">Road</div><div class="cost">$10</div></div>
+  <div class="tool" data-tool="house"><div class="ic">🏠</div><div class="nm">House</div><div class="cost">$100</div></div>
+  <div class="tool" data-tool="apartment"><div class="ic">🏢</div><div class="nm">Apartment</div><div class="cost">$300</div></div>
+  <div class="tool" data-tool="shop"><div class="ic">🏬</div><div class="nm">Shop</div><div class="cost">$200</div></div>
+  <div class="tool" data-tool="office"><div class="ic">🏙️</div><div class="nm">Office</div><div class="cost">$400</div></div>
+  <div class="tool" data-tool="factory"><div class="ic">🏭</div><div class="nm">Factory</div><div class="cost">$350</div></div>
+  <div class="tool" data-tool="park"><div class="ic">🌳</div><div class="nm">Park</div><div class="cost">$80</div></div>
+  <div class="tool" data-tool="powerplant"><div class="ic">⚡</div><div class="nm">Power</div><div class="cost">$600</div></div>
+  <div class="tool" data-tool="windturbine"><div class="ic">🌬️</div><div class="nm">Turbine</div><div class="cost">$250</div></div>
+  <div class="tool" data-tool="bulldoze"><div class="ic">🚧</div><div class="nm">Demolish</div><div class="cost">free</div></div>
+</div>
+
+<div id="sidecontrols">
+  <div class="ctlrow">
+    <div class="btn" id="speed-pause">⏸</div>
+    <div class="btn on" id="speed-1">1×</div>
+    <div class="btn" id="speed-2">2×</div>
+    <div class="btn" id="speed-4">4×</div>
+  </div>
+  <div class="ctlrow">
+    <div class="btn" id="music-toggle" style="flex:1; text-align:center;">🎵 Music: Off</div>
+  </div>
+  <div class="ctlrow" style="align-items:center;">
+    <span id="save-ind">✓ Saved</span>
+    <div class="btn" id="new-city">🆕 New City</div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+// =====================================================================
+//  CONFIG
+// =====================================================================
+const GRID = 24;            // tiles per side
+const TILE = 4;             // world units per tile
+const HALF = (GRID * TILE) / 2;
+
+// use = power consumed, gen = power generated
+const TOOLS = {
+  road:      { cost: 10,  name: 'Road' },
+  house:     { cost: 100, name: 'House',     pop: 4,  type: 'res', use: 2 },
+  apartment: { cost: 300, name: 'Apartment', pop: 20, type: 'res', use: 8 },
+  shop:      { cost: 200, name: 'Shop',      jobs: 8, type: 'com', use: 5 },
+  office:    { cost: 400, name: 'Office',    jobs: 16,type: 'com', use: 10 },
+  factory:   { cost: 350, name: 'Factory',   jobs: 14,type: 'com', use: 8, pollute: 1 },
+  park:      { cost: 80,  name: 'Park' },
+  powerplant:{ cost: 600, name: 'Power Plant', gen: 120, pollute: 2 },
+  windturbine:{cost: 250, name: 'Wind Turbine', gen: 28 },
+  bulldoze:  { cost: 0,   name: 'Demolish' },
+};
+
+// =====================================================================
+//  STATE
+// =====================================================================
+const state = {
+  money: 2000,
+  population: 0,
+  capacity: 0,
+  jobs: 0,
+  happiness: 1.0,
+  trafficLoad: 0,
+  tool: null,
+  speed: 1,
+  paused: false,
+  timeOfDay: 6 / 24,   // 0..1  (start 6am)
+  day: 1,
+  lastIncome: 0,
+  popHistory: 0,
+  powerGen: 0,
+  powerUse: 0,
+  powerRatio: 1,
+  pollution: 0,
+  comJobs: 0,
+  indJobs: 0,
+  demand: { R: 0, C: 0, I: 0 },
+};
+
+// grid[x][z] = { tool, mesh, key } or null
+const grid = [];
+for (let x = 0; x < GRID; x++) { grid[x] = new Array(GRID).fill(null); }
+
+const cars = [];
+
+// =====================================================================
+//  THREE SETUP
+// =====================================================================
+const app = document.getElementById('app');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+app.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.Fog(0x9fc4e8, 80, 220);
+
+const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.set(60, 60, 60);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.maxPolarAngle = Math.PI / 2.15;
+controls.minDistance = 20;
+controls.maxDistance = 160;
+controls.target.set(0, 0, 0);
+
+// ---- Lights ----
+const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambient);
+
+const hemi = new THREE.HemisphereLight(0xbfd9ff, 0x3a4a3a, 0.5);
+scene.add(hemi);
+
+const sun = new THREE.DirectionalLight(0xffffff, 1.4);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1;
+sun.shadow.camera.far = 300;
+const sc = 90;
+sun.shadow.camera.left = -sc; sun.shadow.camera.right = sc;
+sun.shadow.camera.top = sc; sun.shadow.camera.bottom = -sc;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+scene.add(sun.target);
+
+// Moon (soft fill at night)
+const moon = new THREE.DirectionalLight(0x8babdc, 0.0);
+scene.add(moon);
+
+// ---- Ground ----
+const groundMat = new THREE.MeshStandardMaterial({ color: 0x4a7a48, roughness: 1 });
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(GRID * TILE, GRID * TILE), groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+// subtle grid lines
+const gridHelper = new THREE.GridHelper(GRID * TILE, GRID, 0x2e5530, 0x3a6340);
+gridHelper.position.y = 0.02;
+gridHelper.material.opacity = 0.35;
+gridHelper.material.transparent = true;
+scene.add(gridHelper);
+
+// Hover highlight tile
+const hoverMat = new THREE.MeshBasicMaterial({ color: 0x6ea8ff, transparent: true, opacity: 0.35, depthWrite: false });
+const hover = new THREE.Mesh(new THREE.PlaneGeometry(TILE * 0.96, TILE * 0.96), hoverMat);
+hover.rotation.x = -Math.PI / 2;
+hover.position.y = 0.05;
+hover.visible = false;
+scene.add(hover);
+
+// =====================================================================
+//  SKY (gradient via large sphere + dynamic color)
+// =====================================================================
+const skyGeo = new THREE.SphereGeometry(400, 32, 16);
+const skyMat = new THREE.ShaderMaterial({
+  side: THREE.BackSide,
+  uniforms: {
+    top:    { value: new THREE.Color(0x3a78c2) },
+    bottom: { value: new THREE.Color(0xbfe0ff) },
+  },
+  vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
+  fragmentShader: `
+    varying vec3 vP; uniform vec3 top; uniform vec3 bottom;
+    void main(){ float h = normalize(vP).y * 0.5 + 0.5; gl_FragColor = vec4(mix(bottom, top, pow(h,0.7)), 1.0); }`
+});
+const sky = new THREE.Mesh(skyGeo, skyMat);
+scene.add(sky);
+
+// Stars (visible at night)
+const starGeo = new THREE.BufferGeometry();
+const starCount = 600;
+const starPos = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i++) {
+  const v = new THREE.Vector3().randomDirection().multiplyScalar(350);
+  if (v.y < 10) v.y = Math.abs(v.y) + 10;
+  starPos[i*3] = v.x; starPos[i*3+1] = v.y; starPos[i*3+2] = v.z;
+}
+starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+const starMat = new THREE.PointsMaterial({ color: 0xffffff, size: 1.2, transparent: true, opacity: 0 });
+const stars = new THREE.Points(starGeo, starMat);
+scene.add(stars);
+
+// =====================================================================
+//  GEOMETRY / MATERIAL HELPERS
+// =====================================================================
+const matCache = {};
+function mat(color, opts={}) {
+  const key = color + JSON.stringify(opts);
+  if (!matCache[key]) matCache[key] = new THREE.MeshStandardMaterial({ color, roughness: 0.85, ...opts });
+  return matCache[key];
+}
+
+// Window-emissive material that glows at night (we toggle emissiveIntensity)
+const windowMats = [];
+function winMat(color) {
+  const m = new THREE.MeshStandardMaterial({ color, emissive: 0xffe08a, emissiveIntensity: 0, roughness: 0.5 });
+  windowMats.push(m);
+  return m;
+}
+
+function worldPos(gx, gz) {
+  return new THREE.Vector3(gx * TILE - HALF + TILE/2, 0, gz * TILE - HALF + TILE/2);
+}
+
+// ---- Builders return a Group placed at tile center ----
+function buildRoad(gx, gz) {
+  const g = new THREE.Group();
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(TILE, 0.2, TILE), mat(0x3a3f47, { roughness: 1 }));
+  slab.position.y = 0.1; slab.receiveShadow = true;
+  g.add(slab);
+  // lane marking (updated after neighbors known via refreshRoad)
+  g.position.copy(worldPos(gx, gz));
+  return g;
+}
+
+function buildHouse(gx, gz) {
+  const g = new THREE.Group();
+  const colors = [0xe8c9a0, 0xd6a98a, 0xc9d6b0, 0xb0c4d6];
+  const c = colors[(gx*3+gz*7) % colors.length];
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.2, 1.6, 2.2), winMat(c));
+  body.position.y = 0.9; body.castShadow = body.receiveShadow = true;
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(1.9, 1.1, 4), mat(0x8a4a3a));
+  roof.position.y = 2.25; roof.rotation.y = Math.PI/4; roof.castShadow = true;
+  g.add(body, roof);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = 1.7;
+  return g;
+}
+
+function buildApartment(gx, gz) {
+  const g = new THREE.Group();
+  const h = 5 + ((gx+gz) % 3) * 1.5;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(2.8, h, 2.8), winMat(0xc7d2dd));
+  body.position.y = h/2; body.castShadow = body.receiveShadow = true;
+  g.add(body);
+  const top = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 1.2), mat(0x9aa6b2));
+  top.position.y = h + 0.3; top.castShadow = true; g.add(top);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = h + 0.6;
+  return g;
+}
+
+function buildShop(gx, gz) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 3), winMat(0xe0b84a));
+  body.position.y = 1; body.castShadow = body.receiveShadow = true;
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(3.1, 0.5, 0.2), mat(0xd84a5a, { emissive:0xd84a5a, emissiveIntensity:0.2 }));
+  sign.position.set(0, 1.6, 1.5); g.add(body, sign);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = 2.2;
+  return g;
+}
+
+function buildOffice(gx, gz) {
+  const g = new THREE.Group();
+  const h = 8 + ((gx*2+gz) % 4) * 2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3, h, 3), winMat(0x7fb0d8));
+  body.position.y = h/2; body.castShadow = body.receiveShadow = true;
+  g.add(body);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = h;
+  return g;
+}
+
+function buildPark(gx, gz) {
+  const g = new THREE.Group();
+  const grass = new THREE.Mesh(new THREE.BoxGeometry(TILE*0.95, 0.15, TILE*0.95), mat(0x5fa84e, { roughness:1 }));
+  grass.position.y = 0.08; grass.receiveShadow = true; g.add(grass);
+  for (let i=0;i<3;i++){
+    const tree = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.12,0.16,0.7), mat(0x6b4a2a));
+    trunk.position.y = 0.35;
+    const leaves = new THREE.Mesh(new THREE.SphereGeometry(0.65, 8, 8), mat(0x2f7a36));
+    leaves.position.y = 1.0; leaves.castShadow = true;
+    tree.add(trunk, leaves);
+    tree.position.set((i-1)*1.1 + (i%2?0.3:-0.3), 0, (i%2)*1.0 - 0.5);
+    g.add(tree);
+  }
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = 1.0;
+  return g;
+}
+
+// animated parts registries
+const turbines = [];     // {group, blades}
+const smokeStacks = [];  // {puffs:[{mesh, phase, x, z}], topY}
+
+function makeSmoke(g, x, topY, z, color=0x888888) {
+  const puffs = [];
+  for (let i=0;i<5;i++){
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6),
+      new THREE.MeshStandardMaterial({ color, transparent:true, opacity:0.5, roughness:1 }));
+    m.position.set(x, topY, z);
+    g.add(m);
+    puffs.push({ mesh:m, phase: i/5, x, z });
+  }
+  smokeStacks.push({ puffs, topY, group:g });
+}
+
+function buildFactory(gx, gz) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.4, 3.2), winMat(0xb0a89a));
+  body.position.y = 1.2; body.castShadow = body.receiveShadow = true; g.add(body);
+  const roofUnit = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.6,1.2), mat(0x8a8278));
+  roofUnit.position.set(-0.6,2.7,-0.6); roofUnit.castShadow = true; g.add(roofUnit);
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.35,0.4,2.2), mat(0x9a4a3a));
+  stack.position.set(1, 3.5, 1); stack.castShadow = true; g.add(stack);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = 4.6;
+  makeSmoke(g, 1, 4.6, 1, 0x6a6a6a);
+  return g;
+}
+
+function buildPowerPlant(gx, gz) {
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2, 3.4), mat(0x8c95a0));
+  body.position.y = 1; body.castShadow = body.receiveShadow = true; g.add(body);
+  // two cooling towers
+  for (const dx of [-0.8, 0.8]) {
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.95, 2.6, 16, 1, true), mat(0xd7dce2, { side: THREE.DoubleSide }));
+    tower.position.set(dx, 3.0, -0.6); tower.castShadow = true; g.add(tower);
+    makeSmoke(g, dx, 4.4, -0.6, 0xcccccc);
+  }
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(1.4,0.5,0.1), mat(0xf0d040, {emissive:0xf0d040, emissiveIntensity:0.3}));
+  sign.position.set(0,1.4,1.71); g.add(sign);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = 4.4;
+  return g;
+}
+
+function buildWindTurbine(gx, gz) {
+  const g = new THREE.Group();
+  const base = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.3, 5.5), mat(0xeef2f6, { roughness:0.5 }));
+  base.position.y = 2.75; base.castShadow = true; g.add(base);
+  const hub = new THREE.Group();
+  hub.position.set(0, 5.4, 0.25);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(0.22,8,8), mat(0xdfe6ee));
+  hub.add(nose);
+  for (let i=0;i<3;i++){
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.12, 2.4, 0.4), mat(0xf2f6fa, {roughness:0.4}));
+    blade.position.y = 1.2;
+    const arm = new THREE.Group();
+    arm.add(blade);
+    arm.rotation.z = i * (Math.PI*2/3);
+    hub.add(arm);
+  }
+  g.add(hub);
+  g.position.copy(worldPos(gx, gz));
+  g.userData.grow = 5.5;
+  turbines.push({ group:g, blades:hub });
+  return g;
+}
+
+const BUILDERS = { road: buildRoad, house: buildHouse, apartment: buildApartment, shop: buildShop, office: buildOffice, factory: buildFactory, park: buildPark, powerplant: buildPowerPlant, windturbine: buildWindTurbine };
+
+// =====================================================================
+//  PLACE / REMOVE
+// =====================================================================
+function place(gx, gz, tool, free=false) {
+  if (gx < 0 || gz < 0 || gx >= GRID || gz >= GRID) return;
+  if (tool === 'bulldoze') { remove(gx, gz); return; }
+
+  const def = TOOLS[tool];
+  if (!free && state.money < def.cost) { toast('Not enough money!'); return; }
+
+  if (grid[gx][gz]) {
+    if (grid[gx][gz].tool === tool) return; // same, ignore
+    remove(gx, gz, true); // replace, refund handled below as silent
+  }
+
+  if (!free) state.money -= def.cost;
+  const mesh = BUILDERS[tool](gx, gz);
+  // grow-in animation (skip when loading a saved city)
+  if (mesh.userData.grow && !free) { mesh.scale.y = 0.01; mesh.userData.targetGrow = true; }
+  scene.add(mesh);
+  grid[gx][gz] = { tool, mesh };
+
+  if (tool === 'road') refreshRoadsAround(gx, gz);
+  recomputeStats();
+  if (!free) saveCity();
+}
+
+function remove(gx, gz, silent=false) {
+  const cell = grid[gx][gz];
+  if (!cell) return;
+  scene.remove(cell.mesh);
+  // drop any animated parts that belonged to this building
+  for (let i=turbines.length-1;i>=0;i--) if (turbines[i].group===cell.mesh) turbines.splice(i,1);
+  for (let i=smokeStacks.length-1;i>=0;i--) if (smokeStacks[i].group===cell.mesh) smokeStacks.splice(i,1);
+  grid[gx][gz] = null;
+  if (cell.tool === 'road') refreshRoadsAround(gx, gz);
+  if (!silent) { recomputeStats(); saveCity(); }
+}
+
+// Add lane markings to road tiles depending on neighbors (simple)
+function refreshRoadsAround(gx, gz) {
+  for (let dx=-1; dx<=1; dx++) for (let dz=-1; dz<=1; dz++) {
+    if (Math.abs(dx)+Math.abs(dz)!==0 && Math.abs(dx)+Math.abs(dz)!==1) continue;
+    const x=gx+dx, z=gz+dz;
+    if (x<0||z<0||x>=GRID||z>=GRID) continue;
+    const c = grid[x][z];
+    if (c && c.tool==='road') drawLaneMarks(c, x, z);
+  }
+  rebuildTrafficNetwork();
+}
+
+function isRoad(x,z){ return x>=0&&z>=0&&x<GRID&&z<GRID&&grid[x][z]&&grid[x][z].tool==='road'; }
+
+function drawLaneMarks(cell, gx, gz) {
+  // remove old marks
+  cell.mesh.children.filter(c=>c.userData.mark).forEach(c=>cell.mesh.remove(c));
+  const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+  dirs.forEach(([dx,dz])=>{
+    if (isRoad(gx+dx,gz+dz)) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(dx?TILE/2:0.18, 0.02, dz?TILE/2:0.18), mat(0xf0d878, {emissive:0x000000}));
+      m.position.set(dx*TILE/4, 0.22, dz*TILE/4);
+      m.userData.mark = true;
+      cell.mesh.add(m);
+    }
+  });
+}
+
+// =====================================================================
+//  TRAFFIC NETWORK
+// =====================================================================
+let roadList = [];
+function rebuildTrafficNetwork() {
+  roadList = [];
+  for (let x=0;x<GRID;x++) for (let z=0;z<GRID;z++) if (isRoad(x,z)) roadList.push([x,z]);
+  // adjust car population to road size & city pop
+  const target = Math.min(60, Math.floor(roadList.length * 0.5 + state.population * 0.02));
+  while (cars.length < target) spawnCar();
+  while (cars.length > target) { const c = cars.pop(); scene.remove(c.mesh); }
+}
+
+function neighbors(x,z){
+  const out=[];
+  [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dz])=>{ if(isRoad(x+dx,z+dz)) out.push([x+dx,z+dz]); });
+  return out;
+}
+
+function spawnCar() {
+  if (roadList.length===0) return;
+  const colors=[0xe85d5d,0x5d8de8,0xe8c95d,0x5de89a,0xffffff,0x9b5de8];
+  const car = new THREE.Mesh(new THREE.BoxGeometry(0.9,0.5,1.6), mat(colors[Math.floor(Math.random()*colors.length)], {roughness:0.4, metalness:0.3}));
+  car.castShadow = true;
+  const start = roadList[Math.floor(Math.random()*roadList.length)];
+  scene.add(car);
+  cars.push({ mesh: car, from: start, to: pickNeighborOr(start), t: Math.random(), speed: 0.5+Math.random()*0.4 });
+}
+
+function pickNeighborOr(node){
+  const n = neighbors(node[0],node[1]);
+  return n.length ? n[Math.floor(Math.random()*n.length)] : node;
+}
+
+function updateCars(dt) {
+  let congestion = 0;
+  for (const car of cars) {
+    if (!isRoad(car.from[0],car.from[1])) { car.from = roadList.length?roadList[Math.floor(Math.random()*roadList.length)]:[0,0]; car.to=pickNeighborOr(car.from); car.t=0; }
+    car.t += dt * car.speed * 0.6;
+    if (car.t >= 1) {
+      car.t = 0; car.from = car.to;
+      // avoid immediate backtrack when possible
+      const n = neighbors(car.from[0],car.from[1]);
+      if (n.length>1) {
+        const filtered = n.filter(p=>p[0]!==car.prevX||p[1]!==car.prevZ);
+        car.prevX = car.from[0]; car.prevZ = car.from[1];
+        car.to = (filtered.length?filtered:n)[Math.floor(Math.random()* (filtered.length?filtered.length:n.length))];
+      } else if (n.length===1) { car.to = n[0]; }
+    }
+    const a = worldPos(car.from[0],car.from[1]);
+    const b = worldPos(car.to[0],car.to[1]);
+    // slow down in heavy traffic (congestion based on load)
+    const ease = state.trafficLoad>0.7 ? 0.5 : 1;
+    car.mesh.position.lerpVectors(a,b,car.t);
+    car.mesh.position.y = 0.45;
+    // offset to right lane
+    const dir = new THREE.Vector3().subVectors(b,a).normalize();
+    car.mesh.position.x += dir.z * 0.7;
+    car.mesh.position.z += -dir.x * 0.7;
+    if (dir.length()>0) car.mesh.rotation.y = Math.atan2(dir.x, dir.z);
+  }
+  // congestion metric: cars per road tile
+  state.trafficLoad = roadList.length ? Math.min(1, cars.length / (roadList.length*1.4)) : 0;
+}
+
+// =====================================================================
+//  ECONOMY / SIM
+// =====================================================================
+function recomputeStats() {
+  let capacity=0, jobs=0, resCount=0, comCount=0, parks=0, roads=0;
+  let connectedRes=0, powerGen=0, powerUse=0, pollution=0;
+  let comJobs=0, indJobs=0, indCount=0;
+  for (let x=0;x<GRID;x++) for (let z=0;z<GRID;z++) {
+    const c = grid[x][z]; if(!c) continue;
+    const def = TOOLS[c.tool];
+    const adjToRoad = isRoad(x+1,z)||isRoad(x-1,z)||isRoad(x,z+1)||isRoad(x,z-1);
+    if (def.use) powerUse += def.use;
+    if (def.gen) powerGen += def.gen;
+    if (def.pollute) pollution += def.pollute;
+    if (c.tool==='house'||c.tool==='apartment') {
+      resCount++;
+      const cap = def.pop;
+      capacity += cap;
+      if (adjToRoad) connectedRes += cap;
+    } else if (c.tool==='factory') { indCount++; indJobs += def.jobs; jobs += def.jobs; }
+    else if (def.jobs) { comCount++; comJobs += def.jobs; jobs += def.jobs; }
+    else if (c.tool==='park') parks++;
+    else if (c.tool==='road') roads++;
+  }
+  state.capacity = capacity;
+  state.connectedCapacity = connectedRes;
+  state.jobs = jobs;
+  state.parks = parks;
+  state.resCount = resCount; state.comCount = comCount; state.indCount = indCount;
+  state.comJobs = comJobs; state.indJobs = indJobs;
+  state.powerGen = powerGen;
+  state.powerUse = powerUse;
+  state.powerRatio = powerUse>0 ? Math.min(1, powerGen/powerUse) : 1;
+  state.pollution = pollution;
+  computeDemand();
+  rebuildTrafficNetwork();
+}
+
+// ---- RCI demand model (each returns 0..1) ----
+function computeDemand() {
+  const pop = state.population;
+  const jobs = state.jobs;
+  // Residential: people move in when jobs go unfilled and housing is scarce
+  const vacancy = state.connectedCapacity - pop;
+  let R = pop>0 ? (jobs - pop) / Math.max(8, pop) : 0;   // surplus jobs pull residents
+  if (vacancy < Math.max(4, pop*0.1)) R += 0.35;          // almost no housing left
+  if (state.resCount === 0) R = 0.85;                     // empty-city bootstrap
+  // Commercial: shops/offices want to open where there are customers (residents)
+  // target ~1 commercial job per 4 residents
+  let C = pop>0 ? (pop/4 - state.comJobs) / Math.max(8, pop/4) : -1;
+  // Industrial: factories wanted when residents need work (more workers than jobs)
+  let I = pop>0 ? (pop - jobs) / Math.max(8, pop) : -1;
+  state.demand = { R: clamp01(R), C: clamp01(C), I: clamp01(I) };
+}
+function clamp01(v){ return Math.max(0, Math.min(1, v)); }
+
+let simAccum = 0;
+function simStep(dt) {  // dt seconds (already speed-scaled)
+  // ---- power: under-supplied buildings only partially function ----
+  const power = state.powerRatio; // 0..1
+  // ---- population growth toward connected capacity, modulated by happiness, jobs & power ----
+  const effectiveCap = (state.connectedCapacity || 0) * power;
+  const effJobs = state.jobs * power;
+  const jobFactor = state.population>0 ? Math.min(1.2, 0.7 + effJobs / Math.max(1,state.population)) : 1;
+  const targetPop = Math.min(effectiveCap, effectiveCap * Math.min(1, 0.7 + 0.3*jobFactor));
+  const growthRate = 0.35; // per second toward target
+  const prevPop = state.population;
+  if (state.population < targetPop) {
+    state.population += (targetPop - state.population) * growthRate * dt * state.happiness;
+  } else {
+    state.population += (targetPop - state.population) * 0.25 * dt;
+  }
+  state.population = Math.max(0, state.population);
+  state.popHistory = (state.population - prevPop) / dt; // per second delta
+
+  // ---- happiness ----
+  // parks help, traffic & joblessness hurt, overcrowding (pop near cap) slight stress
+  const parkBonus = Math.min(0.25, state.parks * 0.03);
+  const trafficPenalty = state.trafficLoad * 0.3;
+  const jobShortage = state.population>0 ? Math.max(0, 1 - effJobs/Math.max(1,state.population)) * 0.25 : 0;
+  // pollution from factories/power plants, eased by nearby greenery
+  const pollutionPenalty = Math.min(0.3, Math.max(0, state.pollution - state.parks) * 0.04);
+  const powerPenalty = (1 - power) * 0.4; // brownouts make people miserable
+  const targetHappy = Math.max(0.15, Math.min(1, 0.85 + parkBonus - trafficPenalty - jobShortage - pollutionPenalty - powerPenalty));
+  state.happiness += (targetHappy - state.happiness) * Math.min(1, dt*0.5);
+
+  // ---- tax revenue ----
+  // residents pay tax, commerce pays tax, traffic + brownouts reduce efficiency
+  const resTax = state.population * 0.30;
+  const comTax = effJobs * 0.45 * (1 - state.trafficLoad*0.4);
+  const incomePerSec = (resTax + comTax) * state.happiness;
+  const upkeep = (state.resCount*0.25 + state.comCount*0.4 + state.parks*0.4 + roadCount()*0.03
+                  + state.powerGen*0.04); // power plants cost fuel to run
+  const net = incomePerSec - upkeep;
+  state.money += net * dt;
+  state.lastIncome = net;
+}
+
+function roadCount(){ return roadList.length; }
+
+// =====================================================================
+//  DAY / NIGHT CYCLE
+// =====================================================================
+const DAY_LENGTH = 120; // seconds for full 24h cycle at 1x
+
+function updateDayNight(dt) {
+  state.timeOfDay += dt / DAY_LENGTH;
+  while (state.timeOfDay >= 1) { state.timeOfDay -= 1; state.day++; }
+
+  const t = state.timeOfDay;            // 0..1
+  const angle = (t - 0.25) * Math.PI * 2; // sun: noon at t=0.5 overhead
+  const sunY = Math.sin(angle);
+  const sunX = Math.cos(angle);
+  sun.position.set(sunX * 80, sunY * 80, 35);
+  sun.target.position.set(0,0,0);
+  moon.position.set(-sunX*80, -sunY*80, 35);
+
+  // daylight 0..1 (sun above horizon)
+  const day = THREE.MathUtils.clamp(sunY * 1.4 + 0.15, 0, 1);
+  const dusk = THREE.MathUtils.clamp(1 - Math.abs(sunY)*3, 0, 1); // peaks at horizon
+
+  sun.intensity = 0.2 + day * 1.5;
+  // sun color: warm at horizon, white at noon
+  sun.color.setRGB(1, 0.6 + 0.4*day, 0.4 + 0.6*day);
+  ambient.intensity = 0.25 + day * 0.45;
+  hemi.intensity = 0.2 + day*0.5;
+  moon.intensity = (1-day) * 0.35;
+
+  // sky colors
+  const dayTop = new THREE.Color(0x2f6fc2), dayBot = new THREE.Color(0xbfe0ff);
+  const nightTop = new THREE.Color(0x0a1430), nightBot = new THREE.Color(0x1b2747);
+  const duskTop = new THREE.Color(0x3a2a5a), duskBot = new THREE.Color(0xe87a4a);
+  const top = nightTop.clone().lerp(dayTop, day);
+  const bot = nightBot.clone().lerp(dayBot, day);
+  top.lerp(duskTop, dusk*0.5); bot.lerp(duskBot, dusk*0.6);
+  skyMat.uniforms.top.value.copy(top);
+  skyMat.uniforms.bottom.value.copy(bot);
+  scene.fog.color.copy(bot);
+  renderer.setClearColor(bot);
+
+  // stars fade in at night
+  starMat.opacity = (1-day) * 0.9;
+
+  // window glow at night / dusk
+  const glow = THREE.MathUtils.clamp(1 - day*1.3, 0, 1);
+  for (const m of windowMats) m.emissiveIntensity = glow * 0.9;
+  groundMat.color.setRGB(0.29*(0.4+0.6*day), 0.48*(0.4+0.6*day), 0.28*(0.4+0.6*day));
+}
+
+// =====================================================================
+//  INPUT
+// =====================================================================
+const raycaster = new THREE.Raycaster();
+const mouse = new THREE.Vector2();
+let isDragging = false, downPos = null;
+
+function setMouse(e){ mouse.x = (e.clientX/window.innerWidth)*2-1; mouse.y = -(e.clientY/window.innerHeight)*2+1; }
+
+function tileFromEvent(e){
+  setMouse(e);
+  raycaster.setFromCamera(mouse, camera);
+  const hit = raycaster.intersectObject(ground)[0];
+  if (!hit) return null;
+  const gx = Math.floor((hit.point.x + HALF) / TILE);
+  const gz = Math.floor((hit.point.z + HALF) / TILE);
+  if (gx<0||gz<0||gx>=GRID||gz>=GRID) return null;
+  return { gx, gz };
+}
+
+renderer.domElement.addEventListener('pointermove', (e)=>{
+  const tile = tileFromEvent(e);
+  if (tile && state.tool) {
+    hover.visible = true;
+    const p = worldPos(tile.gx, tile.gz);
+    hover.position.set(p.x, 0.05, p.z);
+    hoverMat.color.set(state.tool==='bulldoze' ? 0xe85d5d : 0x6ea8ff);
+    // drag-paint roads
+    if (isDragging && (state.tool==='road' || state.tool==='bulldoze')) place(tile.gx, tile.gz, state.tool);
+  } else hover.visible = false;
+});
+
+renderer.domElement.addEventListener('pointerdown', (e)=>{
+  downPos = {x:e.clientX, y:e.clientY};
+  if (e.button===0 && state.tool) isDragging = true;
+});
+
+renderer.domElement.addEventListener('pointerup', (e)=>{
+  isDragging = false;
+  const moved = downPos && (Math.abs(e.clientX-downPos.x)+Math.abs(e.clientY-downPos.y) > 5);
+  const tile = tileFromEvent(e);
+  if (!tile) return;
+  if (e.button===2) { remove(tile.gx, tile.gz); return; }  // right click demolish
+  if (e.button===0 && state.tool && !moved) place(tile.gx, tile.gz, state.tool);
+});
+
+renderer.domElement.addEventListener('contextmenu', e=>e.preventDefault());
+
+// Toolbar
+document.querySelectorAll('.tool').forEach(el=>{
+  el.addEventListener('click', ()=>{
+    const t = el.dataset.tool;
+    if (state.tool === t) { state.tool = null; el.classList.remove('active'); hover.visible=false; document.getElementById('hint').textContent='Tool deselected'; return; }
+    state.tool = t;
+    document.querySelectorAll('.tool').forEach(x=>x.classList.remove('active'));
+    el.classList.add('active');
+    document.getElementById('hint').textContent = t==='bulldoze' ? 'Click or drag over tiles to demolish' : `Placing ${TOOLS[t].name} — click the ground (drag for roads)`;
+  });
+});
+
+// Speed controls
+const speedBtns = { pause: document.getElementById('speed-pause'), 1: document.getElementById('speed-1'), 2: document.getElementById('speed-2'), 4: document.getElementById('speed-4') };
+function setSpeed(s){
+  state.paused = (s===0); if(!state.paused) state.speed=s;
+  Object.values(speedBtns).forEach(b=>b.classList.remove('on'));
+  if (state.paused) speedBtns.pause.classList.add('on'); else speedBtns[s].classList.add('on');
+}
+speedBtns.pause.onclick=()=>setSpeed(0);
+speedBtns[1].onclick=()=>setSpeed(1);
+speedBtns[2].onclick=()=>setSpeed(2);
+speedBtns[4].onclick=()=>setSpeed(4);
+
+window.addEventListener('keydown',(e)=>{
+  const map={'1':'road','2':'house','3':'apartment','4':'shop','5':'office','6':'factory','7':'park','8':'powerplant','9':'windturbine','0':'bulldoze'};
+  if(map[e.key]) document.querySelector(`.tool[data-tool="${map[e.key]}"]`).click();
+  if(e.key===' ') { e.preventDefault(); setSpeed(state.paused?1:0); }
+  if(e.key==='Escape' && state.tool) document.querySelector(`.tool[data-tool="${state.tool}"]`).click();
+});
+
+// =====================================================================
+//  HUD UPDATE
+// =====================================================================
+let toastTimer;
+function toast(msg){
+  const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.classList.remove('show'),1600);
+}
+
+function fmtMoney(n){ return '$'+Math.round(n).toLocaleString(); }
+function updateHUD(){
+  document.getElementById('s-money').textContent = fmtMoney(state.money);
+  const md = document.getElementById('s-money-d');
+  md.textContent = (state.lastIncome>=0?'+':'') + fmtMoney(state.lastIncome) + '/s';
+  md.className = 'delta' + (state.lastIncome<0?' neg':'');
+
+  document.getElementById('s-pop').textContent = Math.floor(state.population).toLocaleString();
+  const pd = document.getElementById('s-pop-d');
+  const perMin = state.popHistory*60;
+  pd.textContent = (perMin>=0?'+':'') + perMin.toFixed(0) + '/min';
+  pd.className = 'delta' + (perMin<-0.5?' neg':'');
+
+  const tl = Math.round(state.trafficLoad*100);
+  document.getElementById('s-traffic').textContent = tl + '%';
+  const td = document.getElementById('s-traffic-d');
+  td.textContent = tl>70?'congested':tl>40?'busy':'flowing';
+  td.className = 'delta' + (tl>70?' neg':'');
+
+  document.getElementById('s-happy').textContent = Math.round(state.happiness*100) + '%';
+  const hd = document.getElementById('s-happy-d');
+  hd.textContent = state.happiness>0.8?'thriving':state.happiness>0.55?'content':state.happiness>0.4?'unhappy':'leaving';
+  hd.className='delta'+(state.happiness<0.5?' neg':'');
+
+  document.getElementById('s-power').textContent = Math.round(state.powerUse) + '/' + Math.round(state.powerGen);
+  const pwd = document.getElementById('s-power-d');
+  if (state.powerUse === 0) { pwd.textContent='no demand'; pwd.className='delta'; }
+  else if (state.powerGen >= state.powerUse) { pwd.textContent='supplied'; pwd.className='delta'; }
+  else { pwd.textContent='⚠ brownout'; pwd.className='delta neg'; }
+
+  // RCI demand bars
+  const d = state.demand;
+  document.getElementById('rci-r').style.width = Math.round(d.R*100) + '%';
+  document.getElementById('rci-c').style.width = Math.round(d.C*100) + '%';
+  document.getElementById('rci-i').style.width = Math.round(d.I*100) + '%';
+  document.getElementById('rci-cap').textContent =
+    `Residents ${Math.floor(state.population)} · Jobs ${state.jobs}`;
+
+  // clock
+  const totalMin = state.timeOfDay*24*60;
+  const hh = Math.floor(totalMin/60), mm = Math.floor(totalMin%60);
+  document.getElementById('c-time').textContent = String(hh).padStart(2,'0')+':'+String(mm).padStart(2,'0');
+  let phase='Night';
+  if(hh>=5&&hh<8)phase='Dawn'; else if(hh>=8&&hh<17)phase='Day'; else if(hh>=17&&hh<20)phase='Dusk'; else if(hh>=20||hh<5)phase='Night';
+  document.getElementById('c-phase').textContent = `${phase} · Day ${state.day}`;
+}
+
+// =====================================================================
+//  GENERATIVE AMBIENT MUSIC  (Web Audio — no files needed)
+// =====================================================================
+const music = { ctx:null, on:false, master:null, timer:null, step:0 };
+
+// chord progression (semitone offsets from root), gentle lo-fi pad
+const ROOT = 220; // A3
+const CHORDS = [
+  [0, 4, 7, 11],   // Amaj7
+  [-3, 0, 4, 7],   // F#m7-ish
+  [2, 5, 9, 12],   // Bm7
+  [-2, 2, 5, 9],   // D-ish
+];
+const PENT = [0, 2, 4, 7, 9, 12, 14]; // notes for sparkle melody
+
+function semi(n){ return ROOT * Math.pow(2, n/12); }
+
+function startMusic(){
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return;
+  music.ctx = new Ctx();
+  const ctx = music.ctx;
+
+  music.master = ctx.createGain();
+  music.master.gain.value = 0.0;
+  music.master.connect(ctx.destination);
+
+  // warm low-pass to soften
+  const lp = ctx.createBiquadFilter();
+  lp.type = 'lowpass'; lp.frequency.value = 1400; lp.Q.value = 0.6;
+  lp.connect(music.master);
+
+  // simple feedback delay for space
+  const delay = ctx.createDelay(1.0);
+  delay.delayTime.value = 0.45;
+  const fb = ctx.createGain(); fb.gain.value = 0.35;
+  const wet = ctx.createGain(); wet.gain.value = 0.25;
+  delay.connect(fb); fb.connect(delay); delay.connect(wet); wet.connect(music.master);
+
+  music.bus = lp;
+  music.delaySend = delay;
+
+  // fade in
+  music.master.gain.linearRampToValueAtTime(0.5, ctx.currentTime + 2);
+
+  scheduleBar();
+}
+
+function playNote(freq, time, dur, gainVal, type='triangle', sendDelay=false){
+  const ctx = music.ctx;
+  const osc = ctx.createOscillator();
+  const g = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  // slight detune layer for warmth
+  osc.detune.value = (Math.random()*8-4);
+  g.gain.setValueAtTime(0, time);
+  g.gain.linearRampToValueAtTime(gainVal, time + dur*0.3);  // slow attack
+  g.gain.linearRampToValueAtTime(0, time + dur);            // release
+  osc.connect(g);
+  g.connect(music.bus);
+  if (sendDelay) g.connect(music.delaySend);
+  osc.start(time);
+  osc.stop(time + dur + 0.1);
+}
+
+function scheduleBar(){
+  if (!music.on) return;
+  const ctx = music.ctx;
+  const t = ctx.currentTime + 0.05;
+  // brighter, lighter chords during the day; mellow at night
+  const isNight = state.timeOfDay < 0.25 || state.timeOfDay > 0.8;
+  const barLen = isNight ? 7.0 : 5.5;
+
+  const chord = CHORDS[music.step % CHORDS.length];
+  // pad: hold the chord across the bar
+  chord.forEach((n, i)=>{
+    playNote(semi(n - (i===0?12:0)), t, barLen, 0.10, 'triangle');
+  });
+  // soft bass root
+  playNote(semi(chord[0]-24), t, barLen, 0.13, 'sine');
+
+  // sparkle melody — a couple of pentatonic notes with delay
+  if (!isNight || Math.random()<0.6){
+    const notes = 1 + Math.floor(Math.random()*3);
+    for (let i=0;i<notes;i++){
+      const when = t + (0.3 + Math.random()*(barLen-1));
+      const p = PENT[Math.floor(Math.random()*PENT.length)] + 12;
+      playNote(semi(p), when, 1.4, 0.06, 'sine', true);
+    }
+  }
+
+  music.step++;
+  music.timer = setTimeout(scheduleBar, barLen*1000);
+}
+
+function toggleMusic(){
+  const btn = document.getElementById('music-toggle');
+  if (!music.on){
+    music.on = true;
+    if (!music.ctx) startMusic();
+    else { music.ctx.resume(); music.master.gain.linearRampToValueAtTime(0.5, music.ctx.currentTime+1.5); scheduleBar(); }
+    btn.textContent = '🎵 Music: On';
+    btn.classList.add('on');
+  } else {
+    music.on = false;
+    clearTimeout(music.timer);
+    if (music.ctx) music.master.gain.linearRampToValueAtTime(0.0, music.ctx.currentTime+0.8);
+    btn.textContent = '🎵 Music: Off';
+    btn.classList.remove('on');
+  }
+}
+document.getElementById('music-toggle').addEventListener('click', toggleMusic);
+window.addEventListener('keydown', (e)=>{ if(e.key==='m'||e.key==='M') toggleMusic(); });
+
+// =====================================================================
+//  STARTER LAYOUT
+// =====================================================================
+function seedCity(){
+  const c = Math.floor(GRID/2);
+  for (let i=-4;i<=4;i++){ place(c+i, c, 'road', true); }
+  for (let i=-2;i<=2;i++){ place(c, c+i, 'road', true); }
+  place(c-2,c-1,'house',true); place(c-1,c-1,'house',true); place(c+1,c-1,'house',true);
+  place(c+2,c-1,'shop',true); place(c-2,c+1,'park',true); place(c+2,c+1,'house',true);
+  place(c-1,c+1,'windturbine',true); // initial power so the town isn't in brownout
+  state.money = 2000;
+}
+
+// =====================================================================
+//  SAVE / LOAD  (localStorage)
+// =====================================================================
+const SAVE_KEY = 'mini-city-save-v1';
+let saveIndTimer;
+
+function saveCity(){
+  try {
+    const cells = [];
+    for (let x=0;x<GRID;x++) for (let z=0;z<GRID;z++) {
+      const c = grid[x][z]; if (c) cells.push([x, z, c.tool]);
+    }
+    const data = {
+      v: 1, cells,
+      money: state.money, population: state.population, happiness: state.happiness,
+      timeOfDay: state.timeOfDay, day: state.day,
+    };
+    localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+    const ind = document.getElementById('save-ind');
+    ind.classList.add('show');
+    clearTimeout(saveIndTimer); saveIndTimer = setTimeout(()=>ind.classList.remove('show'), 1200);
+  } catch(e) { /* storage unavailable */ }
+}
+
+function clearCity(){
+  for (let x=0;x<GRID;x++) for (let z=0;z<GRID;z++) if (grid[x][z]) remove(x, z, true);
+  recomputeStats();
+}
+
+function loadCity(){
+  let data;
+  try { data = JSON.parse(localStorage.getItem(SAVE_KEY)); } catch(e) { data = null; }
+  if (!data || !data.cells) return false;
+  clearCity();
+  for (const [x, z, tool] of data.cells) if (TOOLS[tool]) place(x, z, tool, true);
+  state.money = data.money ?? 2000;
+  state.population = data.population ?? 0;
+  state.happiness = data.happiness ?? 1;
+  state.timeOfDay = data.timeOfDay ?? 6/24;
+  state.day = data.day ?? 1;
+  recomputeStats();
+  return true;
+}
+
+function newCity(){
+  if (!confirm('Start a new city? Your current city will be erased.')) return;
+  clearCity();
+  state.money = 2000; state.population = 0; state.happiness = 1;
+  state.timeOfDay = 6/24; state.day = 1;
+  seedCity();
+  recomputeStats();
+  saveCity();
+  toast('New city started');
+}
+document.getElementById('new-city').addEventListener('click', newCity);
+window.addEventListener('beforeunload', saveCity);
+
+// boot: load saved city if present, otherwise seed a starter town
+if (!loadCity()) seedCity();
+recomputeStats();
+// auto-select road tool to start
+document.querySelector('.tool[data-tool="road"]').click();
+
+// =====================================================================
+//  ANIMATION LOOP
+// =====================================================================
+let last = performance.now();
+let hudAccum = 0;
+let saveAccum = 0;
+function loop(now){
+  const rawDt = Math.min(0.05, (now-last)/1000); last = now;
+  const dt = state.paused ? 0 : rawDt * state.speed;
+
+  // grow-in animation for buildings
+  for (let x=0;x<GRID;x++) for (let z=0;z<GRID;z++){
+    const c=grid[x][z];
+    if(c&&c.mesh.userData.targetGrow&&c.mesh.scale.y<1){
+      c.mesh.scale.y = Math.min(1, c.mesh.scale.y + rawDt*4);
+      if(c.mesh.scale.y>=1) c.mesh.userData.targetGrow=false;
+    }
+  }
+
+  if (dt>0){
+    updateDayNight(dt);
+    updateCars(dt);
+    simStep(dt);
+  }
+
+  // spin wind turbines (faster when actually generating / powered)
+  for (const t of turbines) t.blades.rotation.z += rawDt * 2.2;
+
+  // rise + fade factory/cooling smoke
+  for (const s of smokeStacks) {
+    for (const p of s.puffs) {
+      p.phase += rawDt * 0.25;
+      if (p.phase >= 1) p.phase -= 1;
+      p.mesh.position.y = s.topY + p.phase * 3.0;
+      p.mesh.scale.setScalar(0.5 + p.phase * 1.4);
+      p.mesh.material.opacity = 0.5 * (1 - p.phase);
+    }
+  }
+
+  hudAccum += rawDt;
+  if (hudAccum>0.1){ updateHUD(); hudAccum=0; }
+
+  // periodic auto-save (money & time drift continuously)
+  if (dt>0){ saveAccum += rawDt; if (saveAccum>5){ saveCity(); saveAccum=0; } }
+
+  // gentle star twinkle
+  stars.rotation.y += rawDt*0.005;
+
+  controls.update();
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// =====================================================================
+//  RESIZE
+// =====================================================================
+window.addEventListener('resize', ()=>{
+  camera.aspect = window.innerWidth/window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+recomputeStats();
+updateHUD();
+</script>
+</body>
+</html>
