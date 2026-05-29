@@ -335,6 +335,8 @@ function mat(color, opts={}) {
 const windowMats = [];
 function winMat(color) {
   const m = new THREE.MeshStandardMaterial({ color, emissive: 0xffe08a, emissiveIntensity: 0, roughness: 0.5 });
+  m.userData.win = true;    // tracked in windowMats; spliced out on demolish
+  m.userData.unique = true; // not shared via mat() cache — safe to dispose
   windowMats.push(m);
   return m;
 }
@@ -429,8 +431,9 @@ const smokeStacks = [];  // {puffs:[{mesh, phase, x, z}], topY}
 function makeSmoke(g, x, topY, z, color=0x888888) {
   const puffs = [];
   for (let i=0;i<5;i++){
-    const m = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6),
-      new THREE.MeshStandardMaterial({ color, transparent:true, opacity:0.5, roughness:1 }));
+    const smokeMat = new THREE.MeshStandardMaterial({ color, transparent:true, opacity:0.5, roughness:1 });
+    smokeMat.userData.unique = true; // not shared via mat() cache — safe to dispose
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.35, 6, 6), smokeMat);
     m.position.set(x, topY, z);
     g.add(m);
     puffs.push({ mesh:m, phase: i/5, x, z });
@@ -521,10 +524,29 @@ function place(gx, gz, tool, free=false) {
   if (!free) saveCity();
 }
 
+// Free GPU resources for a demolished building: dispose its (always-unique)
+// geometries, drop its window materials from the day/night list, and dispose
+// any materials we created fresh (winMat / smoke) — cached mat() materials are
+// shared, so we leave those alone.
+function disposeMesh(root) {
+  root.traverse(obj => {
+    if (obj.geometry) obj.geometry.dispose();
+    const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
+    for (const m of mats) {
+      if (m.userData && m.userData.win) {
+        const idx = windowMats.indexOf(m);
+        if (idx !== -1) windowMats.splice(idx, 1);
+      }
+      if (m.userData && m.userData.unique) m.dispose();
+    }
+  });
+}
+
 function remove(gx, gz, silent=false) {
   const cell = grid[gx][gz];
   if (!cell) return;
   scene.remove(cell.mesh);
+  disposeMesh(cell.mesh);
   // drop any animated parts that belonged to this building
   for (let i=turbines.length-1;i>=0;i--) if (turbines[i].group===cell.mesh) turbines.splice(i,1);
   for (let i=smokeStacks.length-1;i>=0;i--) if (smokeStacks[i].group===cell.mesh) smokeStacks.splice(i,1);
@@ -571,7 +593,7 @@ function rebuildTrafficNetwork() {
   // adjust car population to road size & city pop
   const target = Math.min(60, Math.floor(roadList.length * 0.5 + state.population * 0.02));
   while (cars.length < target) spawnCar();
-  while (cars.length > target) { const c = cars.pop(); scene.remove(c.mesh); }
+  while (cars.length > target) { const c = cars.pop(); scene.remove(c.mesh); c.mesh.geometry.dispose(); }
 }
 
 function neighbors(x,z){
