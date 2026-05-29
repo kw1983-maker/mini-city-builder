@@ -22,12 +22,13 @@ An interactive 3D city-building simulator that runs entirely in the browser from
 
 No build step, no dependencies to install. Either:
 
-- **Open directly:** double-click `city.html` (needs an internet connection — Three.js loads from a CDN), **or**
+- **Open directly:** double-click `index.html` (needs an internet connection — Three.js loads from a CDN), **or**
 - **Serve locally:**
   ```bash
   python -m http.server 8000
-  # then visit http://localhost:8000/city.html
+  # then visit http://localhost:8000/
   ```
+- **Live demo:** deployed via Vercel / GitHub Pages — the root URL serves the app.
 
 ## 🎮 Controls
 
@@ -45,7 +46,7 @@ No build step, no dependencies to install. Either:
 
 ## 🛠️ Tech
 
-Plain HTML + JavaScript with [Three.js](https://threejs.org/) (loaded via CDN import map) and the Web Audio API. Everything lives in one self-contained `city.html`.
+Plain HTML + JavaScript with [Three.js](https://threejs.org/) (loaded via CDN import map) and the Web Audio API. Everything lives in one self-contained `index.html`.
 
 ## 📄 License
 
